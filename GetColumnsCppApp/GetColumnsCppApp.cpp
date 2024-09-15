@@ -5,10 +5,6 @@
 #include <iostream>
 #include <string>
 
-#ifndef BHID_ColumnManager
-extern "C" const GUID BHID_ColumnManager = { 0xD8EC27BB, 0x3F3B, 0x4042, { 0xB1, 0x4D, 0x34, 0xE2, 0xD0, 0x3B, 0x0C, 0x30 } };
-#endif
-
 int wmain(int argc, wchar_t* argv[])
 {
     if (argc != 2)
@@ -24,21 +20,100 @@ int wmain(int argc, wchar_t* argv[])
         return 1;
     }
 
-    IShellItem2* pShellItem = nullptr;
-    hr = SHCreateItemFromParsingName(argv[1], NULL, IID_PPV_ARGS(&pShellItem));
-    if (FAILED(hr))
+    // Create hidden window
+    WNDCLASSW wc = { 0 };
+    wc.lpfnWndProc = DefWindowProcW;
+    wc.hInstance = GetModuleHandle(NULL);
+    wc.lpszClassName = L"HiddenWindowClass";
+
+    RegisterClassW(&wc);
+
+    HWND hwnd = CreateWindowW(wc.lpszClassName, L"Hidden Window", WS_OVERLAPPEDWINDOW,
+        CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT,
+        NULL, NULL, wc.hInstance, NULL);
+
+    if (!hwnd)
     {
-        std::wcout << L"Failed to create IShellItem2 for " << argv[1] << std::endl;
+        std::wcout << L"Failed to create hidden window" << std::endl;
         CoUninitialize();
         return 1;
     }
 
-    IColumnManager* pColumnManager = nullptr;
-    hr = pShellItem->BindToHandler(NULL, BHID_ColumnManager, IID_PPV_ARGS(&pColumnManager));
+    // Get IShellFolder for the directory
+    IShellFolder* pDesktopFolder = NULL;
+    hr = SHGetDesktopFolder(&pDesktopFolder);
     if (FAILED(hr))
     {
-        std::wcout << L"Failed to get IColumnManager" << std::endl;
-        pShellItem->Release();
+        std::wcout << L"SHGetDesktopFolder failed" << std::endl;
+        DestroyWindow(hwnd);
+        CoUninitialize();
+        return 1;
+    }
+
+    LPITEMIDLIST pidlFolder = NULL;
+    hr = SHParseDisplayName(argv[1], NULL, &pidlFolder, 0, NULL);
+    if (FAILED(hr))
+    {
+        std::wcout << L"SHParseDisplayName failed for " << argv[1] << std::endl;
+        pDesktopFolder->Release();
+        DestroyWindow(hwnd);
+        CoUninitialize();
+        return 1;
+    }
+
+    IShellFolder* pFolder = NULL;
+    hr = pDesktopFolder->BindToObject(pidlFolder, NULL, IID_PPV_ARGS(&pFolder));
+    if (FAILED(hr))
+    {
+        std::wcout << L"BindToObject failed" << std::endl;
+        CoTaskMemFree(pidlFolder);
+        pDesktopFolder->Release();
+        DestroyWindow(hwnd);
+        CoUninitialize();
+        return 1;
+    }
+
+    // Create IShellView
+    IShellView* pShellView = NULL;
+    hr = pFolder->CreateViewObject(hwnd, IID_PPV_ARGS(&pShellView));
+    if (FAILED(hr))
+    {
+        std::wcout << L"CreateViewObject failed" << std::endl;
+        pFolder->Release();
+        CoTaskMemFree(pidlFolder);
+        pDesktopFolder->Release();
+        DestroyWindow(hwnd);
+        CoUninitialize();
+        return 1;
+    }
+
+    // Get IFolderView2
+    IFolderView2* pFolderView2 = NULL;
+    hr = pShellView->QueryInterface(IID_PPV_ARGS(&pFolderView2));
+    if (FAILED(hr))
+    {
+        std::wcout << L"QueryInterface for IFolderView2 failed" << std::endl;
+        pShellView->Release();
+        pFolder->Release();
+        CoTaskMemFree(pidlFolder);
+        pDesktopFolder->Release();
+        DestroyWindow(hwnd);
+        CoUninitialize();
+        return 1;
+    }
+
+    // Get IColumnManager
+    IColumnManager* pColumnManager = NULL;
+    hr = pFolderView2->QueryInterface(IID_PPV_ARGS(&pColumnManager));
+    if (FAILED(hr))
+    {
+        std::wcout << L"QueryInterface for IColumnManager failed" << std::endl;
+        pFolderView2->Release();
+        pShellView->Release();
+        pFolder->Release();
+        CoTaskMemFree(pidlFolder);
+        pDesktopFolder->Release();
+        DestroyWindow(hwnd);
         CoUninitialize();
         return 1;
     }
@@ -49,29 +124,40 @@ int wmain(int argc, wchar_t* argv[])
     {
         std::wcout << L"GetColumnCount failed" << std::endl;
         pColumnManager->Release();
-        pShellItem->Release();
+        pFolderView2->Release();
+        pShellView->Release();
+        pFolder->Release();
+        CoTaskMemFree(pidlFolder);
+        pDesktopFolder->Release();
+        DestroyWindow(hwnd);
         CoUninitialize();
         return 1;
     }
 
-    std::unique_ptr<PROPERTYKEY[]> rgColumns(new PROPERTYKEY[cColumns]);
-    hr = pColumnManager->GetColumns(CM_ENUM_VISIBLE, rgColumns.get(), cColumns);
+    PROPERTYKEY* rgColumns = new PROPERTYKEY[cColumns];
+    hr = pColumnManager->GetColumns(CM_ENUM_VISIBLE, rgColumns, cColumns);
     if (FAILED(hr))
     {
         std::wcout << L"GetColumns failed" << std::endl;
+        delete[] rgColumns;
         pColumnManager->Release();
-        pShellItem->Release();
+        pFolderView2->Release();
+        pShellView->Release();
+        pFolder->Release();
+        CoTaskMemFree(pidlFolder);
+        pDesktopFolder->Release();
+        DestroyWindow(hwnd);
         CoUninitialize();
         return 1;
     }
 
     for (UINT i = 0; i < cColumns; i++)
     {
-        IPropertyDescription* pPropDesc = nullptr;
+        IPropertyDescription* pPropDesc = NULL;
         hr = PSGetPropertyDescription(rgColumns[i], IID_PPV_ARGS(&pPropDesc));
         if (SUCCEEDED(hr))
         {
-            LPWSTR pszDisplayName = nullptr;
+            LPWSTR pszDisplayName = NULL;
             hr = pPropDesc->GetDisplayName(&pszDisplayName);
             if (SUCCEEDED(hr))
             {
@@ -82,8 +168,15 @@ int wmain(int argc, wchar_t* argv[])
         }
     }
 
+    delete[] rgColumns;
     pColumnManager->Release();
-    pShellItem->Release();
+    pFolderView2->Release();
+    pShellView->Release();
+    pFolder->Release();
+    CoTaskMemFree(pidlFolder);
+    pDesktopFolder->Release();
+    DestroyWindow(hwnd);
+    UnregisterClassW(wc.lpszClassName, wc.hInstance);
     CoUninitialize();
 
     return 0;

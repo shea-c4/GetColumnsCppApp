@@ -30,3 +30,8 @@
 *.exe
 *.out
 *.app
+/.vs
+/GetColumnsCppApp/GetColumnsCppApp.vcxproj.filters
+/GetColumnsCppApp/GetColumnsCppApp.vcxproj.user
+/GetColumnsCppApp/x64/Debug
+/x64/Debug
