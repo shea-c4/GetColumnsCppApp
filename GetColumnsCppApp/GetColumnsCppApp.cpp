@@ -5,11 +5,14 @@
 #include <iostream>
 #include <string>
 
+#pragma comment(lib, "shell32.lib")
+#pragma comment(lib, "propsys.lib")
+
 int wmain(int argc, wchar_t* argv[])
 {
     if (argc != 2)
     {
-        std::wcout << L"Usage: GetColumns.exe <directory_path>" << std::endl;
+        std::wcout << L"Usage: GetColumnsCppApp.exe <directory_path>" << std::endl;
         return 1;
     }
 
@@ -150,7 +153,8 @@ int wmain(int argc, wchar_t* argv[])
         CoUninitialize();
         return 1;
     }
-
+    
+    std::wcout << L"Windows File Explorer Detail View Visible Columns for " << argv[1] << std::endl;
     for (UINT i = 0; i < cColumns; i++)
     {
         IPropertyDescription* pPropDesc = NULL;
